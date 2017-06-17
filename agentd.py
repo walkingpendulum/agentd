@@ -90,12 +90,12 @@ class Agent(object):
     def health(self):
         self.logger.info('health check: ok')
 
-    @staticmethod
-    def restart():
+    def restart(self):
         def _restart():
             subprocess.call('sudo %s' % script_path, shell=True)
 
         atexit.register(_restart())
+        self.stop()
 
     def spawn_process(self, cmd, callable, args_string):
         kwargs = {'target': callable}
@@ -127,6 +127,7 @@ class Agent(object):
     def run_server(self):
         sock = self.make_server_socket()
 
+        self.logger.info('agent started')
         while True:
             try:
                 # Wait for a connection
