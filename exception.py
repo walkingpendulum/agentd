@@ -1,0 +1,2 @@
+class ServerStopException(BaseException):
+    pass
