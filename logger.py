@@ -63,7 +63,7 @@ def create_logger(logger_name, level=logging.INFO):
     formatter = logging.Formatter(
         '%(asctime)s '
         '- %(levelname)s '
-        '- [%(filename)s:%(lineno)s - %(funcName)20s() ] '
+        '- [%(filename)s:%(lineno)s - %(funcName)s ] '
         '- %(message)s'
     )
     custom_handler.setFormatter(formatter)

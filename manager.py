@@ -34,8 +34,15 @@ class ProcessManager(object):
         self.running_processes_registry = self.storage.setdefault('running', {})
         self.waiting_for_registration_processes_registry = self.storage.setdefault('waiting', {})
 
-    def stop(self, stop_processes=True):
-        if stop_processes:
+    def info(self):
+        info = {
+            'running': self.running_processes_registry,
+            'waiting': self.waiting_for_registration_processes_registry
+        }
+        return info
+
+    def stop(self, keep_processess=False):
+        if not keep_processess:
             self.stop_all_processes()
 
         self.storage.close()
@@ -43,11 +50,11 @@ class ProcessManager(object):
     def stop_all_processes(self):
         for pid in self.running_processes_registry:
             self.stop_process(pid)
-        self.running_processes_registry = {}
+        self.storage['running'] = {}
 
         for pid in self.waiting_for_registration_processes_registry:
             self.stop_process(pid)
-        self.waiting_for_registration_processes_registry = {}
+            self.storage['waiting'] = {}
 
     def stop_process(self, pid):
         try:
@@ -58,6 +65,7 @@ class ProcessManager(object):
     def register_process(self, pid):
         try:
             process_data = self.waiting_for_registration_processes_registry[pid]
+            del self.storage['waiting'][pid]
         except KeyError:
             self.logger.error('Attempt to register process with pid %s failed' % pid)
             return
@@ -72,6 +80,16 @@ class ProcessManager(object):
                     pid=pid, **process_data
                 )
             )
+
+    def unlink(self, pid):
+        self.stop_process(pid)
+        process_data = self.storage['running'][pid]
+        del self.storage['running'][pid]
+        self.logger.info(
+            'Sucessfully unlink process with pid: {pid}, cmd: {cmd}, args: {args}'.format(
+                pid=pid, **process_data
+            )
+        )
 
     def spawn_process(self, cmd, args_string):
         callable = getattr(commands, cmd, None)

@@ -8,9 +8,12 @@ from settings import agent_settings
 
 script_path = os.path.abspath('./%s' % __file__)
 
+send_logger = create_logger('send')
+receive_logger = create_logger('receive')
+
 
 def send(message, logger=None):
-    logger = logger or create_logger('send')
+    logger = logger or send_logger
 
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
@@ -27,7 +30,7 @@ def send(message, logger=None):
 
 
 def receive(sock, logger=None):
-    logger = logger or create_logger('receive')
+    logger = logger or receive_logger
 
     _message = []
     try:

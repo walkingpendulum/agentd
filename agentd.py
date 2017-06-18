@@ -22,7 +22,7 @@ if __name__ == '__main__' and not os.getenv('DISABLE_DAEMON'):
 
 
 class Agent(object):
-    internal_cmd_set = {'stop', 'health', 'restart', 'register'}
+    internal_cmd_set = {'stop', 'health', 'restart', 'register', 'unlink', 'info'}
 
     def __init__(self, sock_address, backlog_connection_number):
         self.logger = create_logger('server')
@@ -59,7 +59,7 @@ class Agent(object):
         return sock
 
     def stop(self, restart=False):
-        self.process_manager.stop(stop_processes=not restart)
+        self.process_manager.stop(keep_processess=restart)
         raise ServerStopException
 
     def health(self):
@@ -74,6 +74,12 @@ class Agent(object):
 
     def register(self, pid):
         self.process_manager.register_process(pid)
+
+    def unlink(self, pid):
+        self.process_manager.unlink(pid)
+
+    def info(self):
+        self.logger.info(self.process_manager.info())
 
     def handle_connection_request(self, connection, client_address):
         message = receive(connection, logger=self.logger)
