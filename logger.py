@@ -1,6 +1,8 @@
 import logging
 import os
 
+from settings import log_folder
+
 
 class StreamToLogger(object):
     """
@@ -24,11 +26,10 @@ class StreamToLogger(object):
 
 
 def make_log_path(logger_name):
-    folder = '/var/log/socket_project_tmp'
-    if not os.path.exists(folder):
-        os.makedirs(folder)
+    if not os.path.exists(log_folder):
+        os.makedirs(log_folder)
 
-    return os.path.join(folder, '%s.log' % logger_name)
+    return os.path.join(log_folder, '%s.log' % logger_name)
 
 
 def set_root_handler(logger):
