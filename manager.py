@@ -1,4 +1,5 @@
 # coding: utf-8
+import copy
 import gdbm
 import logging
 import multiprocessing
@@ -6,9 +7,10 @@ import os
 import shelve
 import signal
 import sys
+import time
 import traceback as tb
 
-import commands
+import tasks
 from exception import ServerStopException
 from logger import create_logger, StreamToLogger
 from settings import db_path, db_folder_path
@@ -54,7 +56,8 @@ class ProcessManager(object):
         self.storage.close()
 
     def stop_all_processes(self):
-        for pid in self.running_processes_registry:
+        running = copy.copy(self.running_processes_registry)    # prevent the `changed size during iteration` error
+        for pid in running:
             self.stop_registered_process(pid)
 
         for pid in self.waiting_for_registration_processes_registry:
@@ -68,7 +71,7 @@ class ProcessManager(object):
         :return:
         """
         self._kill_process(pid)
-        self.unlink(pid)
+        self.unlink_process(pid)
 
     def _kill_process(self, pid):
         """Завершение процесса
@@ -80,6 +83,8 @@ class ProcessManager(object):
             os.kill(int(pid), signal.SIGTERM)
         except OSError:
             pass
+        else:
+            self.logger.info('Successfully kill process with pid %s' % pid)
 
     def register_process(self, pid):
         """Перенос процесса из списка запущенны в список работающих (он штатно запустился и начал работу)
@@ -105,7 +110,7 @@ class ProcessManager(object):
                 )
             )
 
-    def unlink(self, pid):
+    def unlink_process(self, pid):
         """Удаление процесса из списка работающих (когда он завершился)
 
         :param pid:
@@ -119,43 +124,48 @@ class ProcessManager(object):
             )
         )
 
-    def spawn_process(self, cmd, args_string):
-        callable = getattr(commands, cmd, None)
+    def kill_waiting_process(self, pid):
+        """Остановка процесса (если он есть) и удаление его из списка ждущих подтвержения (если он там есть)
+
+        :param pid:
+        :return:
+        """
+        self._kill_process(pid)
+        try:
+            del self.storage['waiting'][pid]
+        except KeyError:
+            pass
+
+    def spawn_process(self, cmd, args):
+        """Порождает новый процесс с задачей. Задача берется из модуля tasks
+
+        :param cmd:
+        :param args:
+        :return:
+        """
+        callable = getattr(tasks, cmd, None)
         if callable is None:
             self.logger.error('Unknown command "%s"' % cmd)
             return
 
         process_kwargs = {'target': callable}
-        cmd_args = []
-        if args_string:
-            cmd_args.extend(args_string.split(' '))
-        process_kwargs.update({'args': tuple(cmd_args)})
+        process_kwargs.update({'args': tuple(args)})
 
         old_err = sys.stderr
         sys.stderr = StreamToLogger(self.logger, log_level=logging.ERROR)
         process = multiprocessing.Process(**process_kwargs)
 
-        self.logger.info('spawn process for cmd: %s, args: %s' % (cmd, cmd_args))
+        self.logger.info('spawn process for cmd: %s, args: %s' % (cmd, args))
 
         try:
+            spawned_at = time.time()
             process.start()
         except Exception:
             msg = tb.format_exc()
             self.logger.error(msg)
         else:
-            process_data = {'cmd': cmd, 'args': cmd_args}
+            process_data = {'cmd': cmd, 'args': args, 'spawned_at': spawned_at}
             pid = str(process.pid)
             self.waiting_for_registration_processes_registry[pid] = process_data
         finally:
             sys.stderr = old_err
-
-    def get_workers_info(self):
-        info = {
-            'running': {
-                k: v for k, v in self.running_processes_registry.items() if v['cmd'] == 'worker'
-            },
-            'waiting': {
-                k: v for k, v in self.waiting_for_registration_processes_registry.items() if v['cmd'] == 'worker'
-            }
-        }
-        return info
