@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 import atexit
+import json
 import os
 import socket
 import subprocess
@@ -79,7 +80,8 @@ class Agent(object):
         self.process_manager.unlink(pid)
 
     def info(self):
-        self.logger.info(self.process_manager.info())
+        info_dict = self.process_manager.info()
+        self.logger.info(json.dumps(info_dict, indent=4))
 
     def handle_connection_request(self, connection, client_address):
         message = receive(connection, logger=self.logger)
@@ -88,7 +90,7 @@ class Agent(object):
 
         cmd, _, args_string = message.partition(' ')
         if cmd in self.internal_cmd_set:
-            getattr(self, cmd)(*([args_string] if args_string else []))
+            getattr(self, cmd)(*(args_string.split(' ') if args_string else []))
             return
 
         self.process_manager.spawn_process(cmd, args_string or None)

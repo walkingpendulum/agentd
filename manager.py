@@ -1,3 +1,4 @@
+# coding: utf-8
 import gdbm
 import logging
 import multiprocessing
@@ -42,6 +43,11 @@ class ProcessManager(object):
         return info
 
     def stop(self, keep_processess=False):
+        """Завершение работы менеджера, сохранение данных, завершение процессов (если требуется)
+
+        :param keep_processess: нужно ли останавливать запущенные процессы
+        :return:
+        """
         if not keep_processess:
             self.stop_all_processes()
 
@@ -49,20 +55,38 @@ class ProcessManager(object):
 
     def stop_all_processes(self):
         for pid in self.running_processes_registry:
-            self.stop_process(pid)
-        self.storage['running'] = {}
+            self.stop_registered_process(pid)
 
         for pid in self.waiting_for_registration_processes_registry:
-            self.stop_process(pid)
-            self.storage['waiting'] = {}
+            self._kill_process(pid)
+        self.storage['waiting'] = {}
 
-    def stop_process(self, pid):
+    def stop_registered_process(self, pid):
+        """Остановка процесса, удаление его из списка работающих
+
+        :param pid:
+        :return:
+        """
+        self._kill_process(pid)
+        self.unlink(pid)
+
+    def _kill_process(self, pid):
+        """Завершение процесса
+
+        :param pid:
+        :return:
+        """
         try:
             os.kill(int(pid), signal.SIGTERM)
         except OSError:
             pass
 
     def register_process(self, pid):
+        """Перенос процесса из списка запущенны в список работающих (он штатно запустился и начал работу)
+
+        :param pid:
+        :return:
+        """
         try:
             process_data = self.waiting_for_registration_processes_registry[pid]
             del self.storage['waiting'][pid]
@@ -82,7 +106,11 @@ class ProcessManager(object):
             )
 
     def unlink(self, pid):
-        self.stop_process(pid)
+        """Удаление процесса из списка работающих (когда он завершился)
+
+        :param pid:
+        :return:
+        """
         process_data = self.storage['running'][pid]
         del self.storage['running'][pid]
         self.logger.info(
@@ -100,12 +128,14 @@ class ProcessManager(object):
         process_kwargs = {'target': callable}
         cmd_args = []
         if args_string:
-            cmd_args.append(args_string)
+            cmd_args.extend(args_string.split(' '))
         process_kwargs.update({'args': tuple(cmd_args)})
 
         old_err = sys.stderr
         sys.stderr = StreamToLogger(self.logger, log_level=logging.ERROR)
         process = multiprocessing.Process(**process_kwargs)
+
+        self.logger.info('spawn process for cmd: %s, args: %s' % (cmd, cmd_args))
 
         try:
             process.start()
@@ -118,3 +148,14 @@ class ProcessManager(object):
             self.waiting_for_registration_processes_registry[pid] = process_data
         finally:
             sys.stderr = old_err
+
+    def get_workers_info(self):
+        info = {
+            'running': {
+                k: v for k, v in self.running_processes_registry.items() if v['cmd'] == 'worker'
+            },
+            'waiting': {
+                k: v for k, v in self.waiting_for_registration_processes_registry.items() if v['cmd'] == 'worker'
+            }
+        }
+        return info
