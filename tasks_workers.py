@@ -1,4 +1,4 @@
-#coding: utf-8
+# coding: utf-8
 import os
 import random
 import signal
@@ -6,7 +6,11 @@ import string
 import sys
 import time
 
-from agentd_commands import unlink_at_exit, register_as_successfully_started, stop_registered_process, info, send
+import requests
+import requests_unixsocket
+
+from agentd_commands import unlink_at_exit, register_as_successfully_started, stop_registered_process, info
+from settings import unix_socket_url_prefix
 
 
 @unlink_at_exit
@@ -20,7 +24,7 @@ def set_workers(num, path):
     all_info = info()
     worker_info = {
         k: {
-            pid: process_data for pid, process_data in v.items() if process_data['cmd'] == 'worker'
+            process_data['pid']: process_data for process_data in v if process_data['cmd'] == 'worker'
         } for k, v in all_info.items()
     }
 
@@ -31,9 +35,7 @@ def set_workers(num, path):
         for pid in pids_to_kill:
             stop_registered_process(pid)
     elif len(workers_data) < num:
-        # collect args for new worker processes
-        # do some stuff
-        not_free_names = {x['args'][0] for x in workers_data.values()}
+        not_free_names = {x['kwargs']['name'] for x in workers_data.values()}
         new_names = set()
         while True:
             name = ''.join(random.sample(string.ascii_lowercase, 16))
@@ -44,11 +46,10 @@ def set_workers(num, path):
             if len(not_free_names) >= num:
                 break
 
-        cmd_with_args_list = ['worker %s %s' % (name, path) for name in new_names]
-
-        # and send tasks to daemon
-        for cmd in cmd_with_args_list:
-            send(cmd)
+        with requests_unixsocket.monkeypatch():
+            for name in new_names:
+                url = '%s/spawn_process' % unix_socket_url_prefix
+                requests.post(url, json={'cmd': 'worker', 'kwargs': {'name': name, 'path': path}})
 
 
 @unlink_at_exit
@@ -60,7 +61,6 @@ def worker(name, path):
         sys.exit(0)
     signal.signal(signal.SIGTERM, _terminate)
 
-    # do some stuff
     file_path = os.path.join(path, '%s.txt' % name)
     while True:
         with open(file_path, 'a') as f:

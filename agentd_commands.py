@@ -1,20 +1,22 @@
-import json
 import os
 from functools import wraps
 
-from network import send_and_receive_answer, send
+import requests
+import requests_unixsocket
+
+from settings import unix_socket_url_prefix
 
 
 def register_as_successfully_started():
-    pid = str(os.getpid())
-    msg = 'register_process %s' % pid
-    send(msg)
+    url = '%s/register_process' % unix_socket_url_prefix
+    with requests_unixsocket.monkeypatch():
+        requests.post(url, json={'pid': os.getpid()})
 
 
 def unlink_as_successfully_completed():
-    pid = str(os.getpid())
-    msg = 'unlink_process %s' % pid
-    send(msg)
+    url = '%s/unlink_process' % unix_socket_url_prefix
+    with requests_unixsocket.monkeypatch():
+        requests.post(url, json={'pid': os.getpid()})
 
 
 def unlink_at_exit(func):
@@ -27,12 +29,15 @@ def unlink_at_exit(func):
 
 
 def info():
-    _msg = send_and_receive_answer('info')
-    msg = json.loads(_msg)
+    url = '%s/info' % unix_socket_url_prefix
+    with requests_unixsocket.monkeypatch():
+        response = requests.get(url)
 
-    return msg
+    info = response.json()['response']
+    return info
 
 
 def stop_registered_process(pid):
-    msg = 'stop_registered_process %s' % pid
-    send(msg)
+    url = '%s/stop_registered_process' % unix_socket_url_prefix
+    with requests_unixsocket.monkeypatch():
+        requests.post(url, json={'pid': pid})
