@@ -1,47 +1,42 @@
 # coding: utf-8
-import copy
-import gdbm
 import logging
 import multiprocessing
 import os
-import shelve
 import signal
 import sys
-import time
 import traceback as tb
 
-import tasks
-from exception import ServerStopException
+from tinydb import TinyDB, Query
+
 from logger import create_logger, StreamToLogger
-from settings import db_path, db_folder_path
+from models import Process as ProcessModel
+
+q = Query()
 
 
+# noinspection PyProtectedMember
 class ProcessManager(object):
-    def __init__(self):
+    def __init__(self, db_path, tasks_module=None):
         self.logger = create_logger('process_manager')
+        self.db = TinyDB(db_path)
+        self.tasks = tasks_module
+        self._waiting_for_registration_processes_table = self.db.table('waiting')
+        self._running_processes_table = self.db.table('running')
 
-        try:
-            if not os.path.exists(db_folder_path):
-                os.makedirs(db_folder_path)
-            self.storage = shelve.open(db_path, writeback=True)
-        except gdbm.error as e:
-            if e.args == (35, 'Resource temporarily unavailable'):
-                raise ServerStopException
-            else:
-                self.logger.error(tb.format_exc())
-                raise
-        except Exception:
-            self.logger.error(tb.format_exc())
-            raise
+    @property
+    def running(self):
+        return self._running_processes_table
 
-        self.running_processes_registry = self.storage.setdefault('running', {})
-        self.waiting_for_registration_processes_registry = self.storage.setdefault('waiting', {})
+    @property
+    def waiting(self):
+        return self._waiting_for_registration_processes_table
 
     def info(self):
         info = {
-            'running': self.running_processes_registry,
-            'waiting': self.waiting_for_registration_processes_registry
+            'running': [ProcessModel.from_record(**rec)._asdict() for rec in self.running],
+            'waiting': [ProcessModel.from_record(waiting=True, **rec)._asdict() for rec in self.waiting],
         }
+
         return info
 
     def stop(self, keep_processess=False):
@@ -53,16 +48,16 @@ class ProcessManager(object):
         if not keep_processess:
             self.stop_all_processes()
 
-        self.storage.close()
+        self.db.close()
 
     def stop_all_processes(self):
-        running = copy.copy(self.running_processes_registry)    # prevent the `changed size during iteration` error
-        for pid in running:
-            self.stop_registered_process(pid)
+        running = self.running.all()   # prevent the `changed size during iteration` error
+        for record in running:
+            self.stop_registered_process(pid=record['pid'])
 
-        for pid in self.waiting_for_registration_processes_registry:
-            self._kill_process(pid)
-        self.storage['waiting'] = {}
+        for record in self.waiting:
+            self._kill_process(pid=record['pid'])
+        self.waiting.purge()
 
     def stop_registered_process(self, pid):
         """Остановка процесса, удаление его из списка работающих
@@ -84,31 +79,23 @@ class ProcessManager(object):
         except OSError:
             pass
         else:
-            self.logger.info('Successfully kill process with pid %s' % pid)
+            self.logger.info('Kill process with pid %s' % pid)
 
     def register_process(self, pid):
-        """Перенос процесса из списка запущенны в список работающих (он штатно запустился и начал работу)
+        """Перенос процесса из списка запущенных в список работающих (штатно запустился и начал работу)
 
         :param pid:
         :return:
         """
-        try:
-            process_data = self.waiting_for_registration_processes_registry[pid]
-            del self.storage['waiting'][pid]
-        except KeyError:
-            self.logger.error('Attempt to register process with pid %s failed' % pid)
-            return
-        else:
-            if pid in self.running_processes_registry:
-                self.logger.error('Attempt to register already presented process with pid %s, aborting' % pid)
-                return
+        process = ProcessModel.from_record(waiting=True, **self.waiting.get(q.pid == pid))
+        self.waiting.remove(q.pid == pid)
 
-            self.running_processes_registry[pid] = process_data
-            self.logger.info(
-                'Successfully register process with pid: {pid}, cmd: {cmd} args: {args}'.format(
-                    pid=pid, **process_data
-                )
-            )
+        if self.running.contains(q.pid == process.pid):
+            self.logger.error('Attempt to register already presented process with pid %s, aborting' % process.pid)
+            return
+
+        self.running.insert(process._asdict())
+        self.logger.info('Register %s' % process)
 
     def unlink_process(self, pid):
         """Удаление процесса из списка работающих (когда он завершился)
@@ -116,13 +103,9 @@ class ProcessManager(object):
         :param pid:
         :return:
         """
-        process_data = self.storage['running'][pid]
-        del self.storage['running'][pid]
-        self.logger.info(
-            'Sucessfully unlink process with pid: {pid}, cmd: {cmd}, args: {args}'.format(
-                pid=pid, **process_data
-            )
-        )
+        process = ProcessModel.from_record(**self.running.get(q.pid == pid))
+        self.running.remove(q.pid == pid)
+        self.logger.info('Unlink %s' % process)
 
     def kill_waiting_process(self, pid):
         """Остановка процесса (если он есть) и удаление его из списка ждущих подтвержения (если он там есть)
@@ -131,41 +114,34 @@ class ProcessManager(object):
         :return:
         """
         self._kill_process(pid)
-        try:
-            del self.storage['waiting'][pid]
-        except KeyError:
-            pass
+        self.waiting.remove(q.pid == pid)
 
-    def spawn_process(self, cmd, args):
+    def spawn_process(self, cmd, args, kwargs):
         """Порождает новый процесс с задачей. Задача берется из модуля tasks
 
+        :param kwargs:
         :param cmd:
         :param args:
         :return:
         """
-        callable = getattr(tasks, cmd, None)
-        if callable is None:
+        callable_ = getattr(self.tasks, cmd, None)
+        if callable_ is None:
             self.logger.error('Unknown command "%s"' % cmd)
             return
 
-        process_kwargs = {'target': callable}
-        process_kwargs.update({'args': tuple(args)})
-
         old_err = sys.stderr
         sys.stderr = StreamToLogger(self.logger, log_level=logging.ERROR)
-        process = multiprocessing.Process(**process_kwargs)
 
-        self.logger.info('spawn process for cmd: %s, args: %s' % (cmd, args))
-
+        # noinspection PyBroadException
         try:
-            spawned_at = time.time()
-            process.start()
+            process_ = multiprocessing.Process(target=callable_, args=args, kwargs=kwargs)
+            process_.start()
         except Exception:
             msg = tb.format_exc()
             self.logger.error(msg)
         else:
-            process_data = {'cmd': cmd, 'args': args, 'spawned_at': spawned_at}
-            pid = str(process.pid)
-            self.waiting_for_registration_processes_registry[pid] = process_data
+            process = ProcessModel(cmd=cmd, process_obj=process_)
+            self.waiting.insert(process._asdict())
+            self.logger.info('Spawn %s' % process)
         finally:
             sys.stderr = old_err
