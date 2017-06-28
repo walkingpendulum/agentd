@@ -28,6 +28,13 @@ class StreamToLogger(object):
         return self.logger.handlers[0].stream.fileno()
 
 
+def setup_tornado_loggers():
+    for logger_name in {'tornado.access', 'tornado.application', 'tornado.general'}:
+        logger = logging.getLogger(logger_name)
+        logger.setLevel(logging.INFO)
+        set_root_handler(logger)
+
+
 def make_log_path(logger_name):
     if not os.path.exists(log_folder):
         os.makedirs(log_folder)

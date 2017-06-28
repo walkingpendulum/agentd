@@ -12,6 +12,7 @@ class Process(object):
         'host',
     )
 
+    # noinspection PyProtectedMember
     def __init__(self, cmd=None, process_obj=None, keep_unfilled=False):
         """
 
@@ -60,6 +61,7 @@ class Process(object):
             'pid={self.pid}, '
             'cmd={self.cmd}, '
             'args={self.args}, '
+            'kwargs={self.kwargs}, '
             '{time_field}'
             ')'
         ).format(

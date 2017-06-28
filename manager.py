@@ -5,21 +5,21 @@ import os
 import signal
 import sys
 import traceback as tb
-from collections import Iterable
 
 from tinydb import TinyDB, Query
 
-import tasks
 from logger import create_logger, StreamToLogger
 from models import Process as ProcessModel
 
 q = Query()
 
 
+# noinspection PyProtectedMember
 class ProcessManager(object):
-    def __init__(self, db_path):
+    def __init__(self, db_path, tasks_module=None):
         self.logger = create_logger('process_manager')
         self.db = TinyDB(db_path)
+        self.tasks = tasks_module
         self._waiting_for_registration_processes_table = self.db.table('waiting')
         self._running_processes_table = self.db.table('running')
 
@@ -119,20 +119,22 @@ class ProcessManager(object):
     def spawn_process(self, cmd, args, kwargs):
         """Порождает новый процесс с задачей. Задача берется из модуля tasks
 
+        :param kwargs:
         :param cmd:
         :param args:
         :return:
         """
-        callable = getattr(tasks, cmd, None)
-        if callable is None:
+        callable_ = getattr(self.tasks, cmd, None)
+        if callable_ is None:
             self.logger.error('Unknown command "%s"' % cmd)
             return
 
         old_err = sys.stderr
         sys.stderr = StreamToLogger(self.logger, log_level=logging.ERROR)
 
+        # noinspection PyBroadException
         try:
-            process_ = multiprocessing.Process(target=callable, args=args, kwargs=kwargs)
+            process_ = multiprocessing.Process(target=callable_, args=args, kwargs=kwargs)
             process_.start()
         except Exception:
             msg = tb.format_exc()
