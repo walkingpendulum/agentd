@@ -181,29 +181,29 @@ def daemonize():
     return (0)
 
 
-# if __name__ == "__main__":
-#     retCode = createDaemon()
-#
-#     # The code, as is, will create a new file in the root directory, when
-#     # executed with superuser privileges.  The file will contain the following
-#     # daemon related process parameters: return code, process ID, parent
-#     # process group ID, session ID, user ID, effective user ID, real group ID,
-#     # and the effective group ID.  Notice the relationship between the daemon's
-#     # process ID, process group ID, and its parent's process ID.
-#
-#     procParams = """
-#    return code = %s
-#    process ID = %s
-#    parent process ID = %s
-#    process group ID = %s
-#    session ID = %s
-#    user ID = %s
-#    effective user ID = %s
-#    real group ID = %s
-#    effective group ID = %s
-#    """ % (retCode, os.getpid(), os.getppid(), os.getpgrp(), os.getsid(0),
-#           os.getuid(), os.geteuid(), os.getgid(), os.getegid())
-#
-#     open("createDaemon.log", "w").write(procParams + "\n")
-#
-#     sys.exit(retCode)
+if __name__ == "__main__":
+    retCode = createDaemon()
+
+    # The code, as is, will create a new file in the root directory, when
+    # executed with superuser privileges.  The file will contain the following
+    # daemon related process parameters: return code, process ID, parent
+    # process group ID, session ID, user ID, effective user ID, real group ID,
+    # and the effective group ID.  Notice the relationship between the daemon's
+    # process ID, process group ID, and its parent's process ID.
+
+    procParams = """
+   return code = %s
+   process ID = %s
+   parent process ID = %s
+   process group ID = %s
+   session ID = %s
+   user ID = %s
+   effective user ID = %s
+   real group ID = %s
+   effective group ID = %s
+   """ % (retCode, os.getpid(), os.getppid(), os.getpgrp(), os.getsid(0),
+          os.getuid(), os.geteuid(), os.getgid(), os.getegid())
+
+    open("createDaemon.log", "w").write(procParams + "\n")
+
+    sys.exit(retCode)

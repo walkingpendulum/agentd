@@ -1,3 +1,4 @@
+# coding=utf-8
 import logging
 import os
 
@@ -18,6 +19,7 @@ class StreamToLogger(object):
         self.linebuf = ''
 
     def write(self, buf):
+        # xxx: этот метод искажает traceback
         for line in buf.rstrip().splitlines():
             self.logger.log(self.log_level, line.rstrip())
 
@@ -29,6 +31,7 @@ class StreamToLogger(object):
 
 
 def setup_tornado_loggers():
+    """Настраиваем логгеры tornado, чтобы они писали в том числе через root_handler"""
     for logger_name in {'tornado.access', 'tornado.application', 'tornado.general'}:
         logger = logging.getLogger(logger_name)
         logger.setLevel(logging.INFO)
@@ -43,6 +46,9 @@ def make_log_path(logger_name):
 
 
 def set_root_handler(logger):
+    """Установка основного хендлера для логов. Для удобства все логи аккуммулируются в одном файле.
+
+    """
     root_handler = logging.FileHandler(make_log_path('all'))
 
     function_info_str = (

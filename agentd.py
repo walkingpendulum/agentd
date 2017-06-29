@@ -21,6 +21,15 @@ from utils import json_content, wrap_with_success_value, get_handler, post_handl
 
 # noinspection PyAbstractClass
 class AgentdBaseHandler(tornado.web.RequestHandler):
+    """Базовый класс обработчика http запросов.
+
+    Перенаправляет post/get запросы на одноименные не-приватные методы объекта.
+    Если соответствующий метод не найден, бросает web.HTTPError(404).
+
+    Идея и часть кода для диспатчинга post/get методов:
+        http://code.activestate.com/recipes/576958-method-based-url-dispatcher-for-the-tornado-web-se/
+
+    """
     def post(self):
         body = json_decode(self.request.body)
         return self._dispatch(body=body)
@@ -49,16 +58,35 @@ class AgentdBaseHandler(tornado.web.RequestHandler):
 
     @staticmethod
     def _stop():
+        """
+        Потокобезопасно добавляем в следующую итерацию ioloop вызов функции spawn_killer
+        (в свою очередь, spawn-killer отправляет SIGTERM в вызвавший его процесс).
+
+        todo: если сервер запущен в несколько потоков, то убит будет только один
+
+        :return:
+        """
         ioloop = tornado.ioloop.IOLoop.instance()
         ioloop.add_callback(spawn_killer)   # trigger sighandler that triggers ioloop.stop()
 
 
 # noinspection PyAbstractClass
 class AgentdWebSocket(AgentdBaseHandler):
+    """Обработка публичных методов API"""
     @get_handler
     @json_content
     @wrap_with_success_value
     def health(self):
+        """
+        GET
+
+        Response example:
+            {
+                "success": 1,
+                "response": "ok"
+            }
+
+        """
         return 'ok'
 
     # noinspection PyUnresolvedReferences
@@ -66,6 +94,33 @@ class AgentdWebSocket(AgentdBaseHandler):
     @json_content
     @wrap_with_success_value
     def info(self):
+        """
+        GET
+
+        Response example:
+            {
+                "success": 1,
+                "response": {
+                    "running": [
+                        {
+                            "pid": 123,
+                            "cmd": "worker",
+                            "args": [999, "path/to/file"],
+                            "kwargs": {
+                                "key": "value"
+                            }
+                            "spawned_at": 1498761885.682778,
+                            "host": "123.domain.server.com",
+                        },
+                        ...
+                    ],
+                    "waiting": [
+                        ...
+                    ]
+                }
+            }
+
+        """
         return self.process_manager.info()
 
     # noinspection PyDefaultArgument, PyUnresolvedReferences
@@ -73,6 +128,22 @@ class AgentdWebSocket(AgentdBaseHandler):
     @json_content
     @wrap_with_success_value
     def run_task(self, cmd, args=tuple(), kwargs={}):
+        """Запуск отдельного процесса с командой cmd, которая будет искаться в модуле tasks
+
+        Поля args и kwargs будут использованы как аргументы при вызове команды: task(*args, **kwargs)
+
+        POST
+
+        Response example:
+            {
+                "success": 1,
+            }
+
+        :param cmd: str
+        :param args: list
+        :param kwargs: dict
+        :return:
+        """
         self.process_manager.spawn_process(cmd=cmd, args=args, kwargs=kwargs)
 
     @staticmethod
@@ -87,6 +158,7 @@ class AgentdWebSocket(AgentdBaseHandler):
 
 # noinspection PyAbstractClass
 class AgentdUnixSocket(AgentdBaseHandler):
+    """Обработка приватных методов API"""
     @get_handler
     @json_content
     @wrap_with_success_value
@@ -128,6 +200,7 @@ class AgentdUnixSocket(AgentdBaseHandler):
 
 
 def spawn_killer():
+    """Порождает отдельный процесс, который шлет SIGTERM в вызвавший его процесс."""
     def killer(pid):
         os.kill(pid, signal.SIGTERM)
 
@@ -148,6 +221,7 @@ def make_unixsocket_app():
 
 
 def shutdown(web, unix):
+    """Останавливаем оба сервера, удаляем unix сокет"""
     web.stop()
 
     unix.stop()
@@ -156,19 +230,42 @@ def shutdown(web, unix):
 
 # noinspection PyUnusedLocal
 def sighandler(*args, **kwargs):
+    """Потокобезопасно добавляем ioloop.stop() в следующую итерацию ioloop"""
     ioloop = tornado.ioloop.IOLoop.instance()
     ioloop.add_callback_from_signal(ioloop.stop)
 
 
 # noinspection PyProtectedMember,PyPep8
 def main():
+    """Старт демона, слушающего web и unix сокеты
+
+    Запускаем два http сервера для обработки публичных и служебных запросов. Публичные запросы
+    принимаются на web порт, служебные на внутренний unix socket.
+
+
+    Начиная с версии 7.40 cURL умеет отправлять http запросы на unix сокеты с помощью флага
+    --unix-socket. При таком сценарии использования все равно требуется указать какой-нибудь хост,
+     всюду в коде для единообразия мы будем указывать localhost. Для отправки запроса из python требуются
+     сторонние библиотеки, например requests-unixsocket. Примеры отправки запроса:
+
+        $ curl --unix-socket /path/to/socket -X POST -d '{"message":"xyz"}' localhost/handler
+
+        >>> import requests_unixsocket, requests
+        >>> with requests_unixsocket.monkeypatch():
+        ...     requests.post('http+unix://%s/handler' % unix_socket_path.replace('/', '%2F'), json={"message":"xyz"})
+
+
+
+    Если выставлена переменная окружения DISABLE_DAEMON, то процесс запускается без демонизации.
+
+    """
     if not os.getenv('DISABLE_DAEMON'):
         daemonize()
 
     setup_tornado_loggers()
 
     websocket_server = HTTPServer(make_websocket_app())
-    websocket_server.bind(port)     # curl -X POST -d '{"message":"xyz"}' localhost:8888/handler
+    websocket_server.bind(port)
     websocket_server.start()
     AgentdWebSocket._create_logger().info('Server started.')
 
@@ -176,7 +273,7 @@ def main():
         os.makedirs(os.path.dirname(unix_socket_path))
     unixsocket_server = HTTPServer(make_unixsocket_app())
     socket = bind_unix_socket(unix_socket_path)
-    unixsocket_server.add_socket(socket)    # curl --unix-socket /path/to/socket -X POST -d '{"message":"xyz"}' localhost/handler
+    unixsocket_server.add_socket(socket)
     unixsocket_server.start()
     AgentdUnixSocket._create_logger().info('Server started.')
 
