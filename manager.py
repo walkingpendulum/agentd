@@ -16,6 +16,34 @@ q = Query()
 
 # noinspection PyProtectedMember
 class ProcessManager(object):
+    """Менеджер запущенных процессов
+
+    При каждом запросе к демону agentd создается экземпляр ProcessManager и открывается
+    соединение с базой данных. После завершения обработки соединение с БД закрывается
+    и экземпляр менеджера уничтожается.
+
+
+    Все запущенные в рамках исполнения заданий процессы делятся на running и waiting.
+
+    Когда процесс только запущен, он считается waiting и записывается в таблицу
+    _waiting_for_registration_processes_table. Это необходимо для отслеживания статуса
+    процесса и мониторинга его успешного запуска.
+
+    Для того чтобы перевести процесс в running, нужно послать запрос на /register_process
+    (метод commands.agentd_local_commands.register_as_successfully_started). После этого
+    подтверждания от процесса менджер переведет его в running и запишет в таблицу
+    _running_processes_table.
+
+    С помощью демона agentd запросы проксируются в этот менджер, который по стуи является бекендом
+    этого фреймворка. Менеджер и выполняет реальное обслуживание запросов. Задачи для выполнения бывают
+    либо служебными (например, регистрация/разрегистрация процессов, остановка процессов и т.д.),
+    либо задачами из модуля tasks.
+
+
+    В качестве базы данных используется TinyDB.
+
+    XXX: использовать tinyrecord (примеры здесь https://github.com/eugene-eeo/tinyrecord) для атомарных операций
+    """
     def __init__(self, db_path, tasks_module=None):
         self.logger = create_logger('process_manager')
         self.db = TinyDB(db_path)
@@ -118,6 +146,9 @@ class ProcessManager(object):
 
     def spawn_process(self, cmd, args, kwargs):
         """Порождает новый процесс с задачей. Задача берется из модуля tasks
+
+        stderr поток при запуске процесса перенаправляется в логгер.
+        XXX: перенаправление искажает реальный traceback
 
         :param kwargs:
         :param cmd:

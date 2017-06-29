@@ -4,8 +4,6 @@ from tornado.options import define, parse_command_line, options
 define("port", default="8888")
 parse_command_line()
 
-# base_folder = '/var/run/agentd'
-# log_folder = '/var/log/agentd'
 base_folder = os.path.abspath('./run')
 log_folder = os.path.abspath('./log')
 

@@ -1,8 +1,11 @@
+# coding=utf-8
 import socket
 import time
 
 
 class Process(object):
+    """Контейнер для данных о процессе"""
+
     dict_fields = (
         'pid',
         'cmd',
@@ -15,7 +18,12 @@ class Process(object):
     # noinspection PyProtectedMember
     def __init__(self, cmd=None, process_obj=None, keep_unfilled=False):
         """
+        Используется в двух сценариях: обертка над объектом multiprocessing.Process либо внутри
+        метода from_record для создания пустого контейнера и дальнейшего заполнения данными из таблицы.
+        В последнем случае нужно указать флаг keep_unfilled
 
+        :param cmd: str
+        :param keep_unfilled: bool
         :param process_obj: multiprocessing.Process object
         """
         assert (cmd is not None and process_obj is not None) or keep_unfilled
